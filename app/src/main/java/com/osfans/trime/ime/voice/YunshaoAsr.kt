@@ -1,8 +1,7 @@
 /*
  * 聆星·云韶离线语音识别（SenseVoice int8 + sherpa-onnx）
- * 2026-11-22 为知世定制：全本地、零联网、零隐私泄露
- * 模型：sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8 (227MB, 中英日韩粤)
- * 性能：RTF 0.033（比实时快30倍），内存 690MB
+ * 模型查找顺序：外部私有目录 > 内部私有目录 > assets
+ * 外部路径：/sdcard/Android/data/com.osfans.trime/files/asr/
  */
 package com.osfans.trime.ime.voice
 
@@ -19,9 +18,10 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 object YunshaoAsr {
     private const val TAG = "YunshaoAsr"
-    private const val ASSET_DIR = "asr"
+    private const val DIR_NAME = "asr"
     private const val MODEL_FILE = "model.int8.onnx"
     private const val TOKENS_FILE = "tokens.txt"
+    private const val MIN_MODEL_BYTES = 10_000_000L
 
     private var recognizer: OfflineRecognizer? = null
     private val loading = AtomicBoolean(false)
@@ -31,21 +31,36 @@ object YunshaoAsr {
     fun isReady(): Boolean = ready && recognizer != null
     fun getError(): String? = lastError
 
-    fun modelDir(ctx: Context): File = File(ctx.filesDir, ASSET_DIR)
+    /** 外部私有目录（用户可直接放文件），Android/data/<pkg>/files/asr */
+    fun externalDir(ctx: Context): File =
+        File(ctx.getExternalFilesDir(null), DIR_NAME)
 
+    /** 内部私有目录（assets 解压目标） */
+    fun internalDir(ctx: Context): File = File(ctx.filesDir, DIR_NAME)
+
+    /** 找出可用的模型目录 */
+    fun resolveDir(ctx: Context): File? {
+        for (d in listOf(externalDir(ctx), internalDir(ctx))) {
+            val m = File(d, MODEL_FILE)
+            val t = File(d, TOKENS_FILE)
+            if (m.exists() && t.exists() && m.length() > MIN_MODEL_BYTES) return d
+        }
+        return null
+    }
+
+    /** 首次运行：若外部/内部都没有，尝试从 assets 解压到内部目录 */
     fun ensureModel(ctx: Context): Boolean {
-        val dir = modelDir(ctx)
-        val model = File(dir, MODEL_FILE)
-        val tokens = File(dir, TOKENS_FILE)
-        if (model.exists() && tokens.exists() && model.length() > 10_000_000L) return true
+        if (resolveDir(ctx) != null) return true
+        val dir = internalDir(ctx)
         if (!dir.exists()) dir.mkdirs()
         return try {
-            copyAsset(ctx, "$ASSET_DIR/$MODEL_FILE", model)
-            copyAsset(ctx, "$ASSET_DIR/$TOKENS_FILE", tokens)
+            copyAsset(ctx, "$DIR_NAME/$MODEL_FILE", File(dir, MODEL_FILE))
+            copyAsset(ctx, "$DIR_NAME/$TOKENS_FILE", File(dir, TOKENS_FILE))
             true
         } catch (e: Exception) {
-            Log.e(TAG, "ensureModel failed", e)
-            lastError = "模型解压失败: " + e.message
+            Log.e(TAG, "ensureModel failed (no assets, no external model)", e)
+            lastError = "未找到模型。请把 model.int8.onnx 和 tokens.txt 放到：" +
+                externalDir(ctx).absolutePath
             false
         }
     }
@@ -62,7 +77,8 @@ object YunshaoAsr {
         Thread {
             try {
                 if (!ensureModel(ctx)) { onDone(false); loading.set(false); return@Thread }
-                val dir = modelDir(ctx)
+                val dir = resolveDir(ctx) ?: run { onDone(false); loading.set(false); return@Thread }
+                Log.i(TAG, "loading model from " + dir.absolutePath)
                 val config = OfflineRecognizerConfig(
                     featConfig = FeatureConfig(sampleRate = 16000, featureDim = 80),
                     modelConfig = OfflineModelConfig(
