@@ -4,10 +4,14 @@
 SPDX-FileCopyrightText: 2015 - 2026 Rime community
 
 SPDX-License-Identifier: GPL-3.0-or-later
+
+System-level speech recognition service description.
+Only android:settingsActivity and android:selectableAsDefault are valid
+here; supported languages are reported at runtime via
+RecognitionListener.onCheckRecognitionSupport().
 -->
 
 <recognition-service
     xmlns:android="http://schemas.android.com/apk/res/android"
-    android:label="@string/yunshao_recognition_name"
-    android:recognitionLanguage="zh-CN"
-    android:recognitionSupportedLanguages="zh-CN,zh-TW,en-US,ja-JP,ko-KR,yue-Hant-HK" />
+    android:settingsActivity="com.osfans.trime.ui.main.MainActivity"
+    android:selectableAsDefault="true" />
