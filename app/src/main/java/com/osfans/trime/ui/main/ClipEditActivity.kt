@@ -1,0 +1,108 @@
+/*
+ * SPDX-FileCopyrightText: 2015 - 2025 Rime community
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
+
+package com.osfans.trime.ui.main
+
+import android.app.Activity
+import android.content.Intent
+import android.os.Bundle
+import android.view.Gravity
+import android.view.inputmethod.InputMethodManager
+import android.widget.EditText
+import com.osfans.trime.data.clip.ClipboardHelper
+import com.osfans.trime.data.clip.FavoriteHelper
+import com.osfans.trime.databinding.ActivityClipEditBinding
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.MainScope
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
+import splitties.systemservices.inputMethodManager
+import timber.log.Timber
+
+class ClipEditActivity : Activity() {
+    private val scope: CoroutineScope = MainScope()
+    private var entityId: Int = -1
+    private lateinit var editText: EditText
+    private var clipType: String? = null
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        window.attributes.gravity = Gravity.TOP
+        val binding =
+            ActivityClipEditBinding.inflate(layoutInflater).apply {
+                editText = clipEditText
+                clipEditCancel.setOnClickListener { finish() }
+                clipEditOk.setOnClickListener { finishEditing() }
+            }
+        setContentView(binding.root)
+        inputMethodManager.showSoftInput(editText, 0)
+        processIntent(intent)
+    }
+
+    private fun finishEditing() {
+        val str = editText.editableText.toString()
+        scope.launch {
+            when (clipType) {
+                FROM_CLIPBOARD -> ClipboardHelper.updateText(entityId, str)
+                FROM_COLLECTION -> FavoriteHelper.updateText(entityId, str)
+                else -> {}
+            }
+        }
+        finish()
+    }
+
+    private fun setEntity(
+        id: Int,
+        text: String,
+    ) {
+        entityId = id
+        editText.setText(text)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        processIntent(intent)
+    }
+
+    private fun processIntent(intent: Intent) {
+        scope.launch {
+            intent.run {
+                val clipType = intent.getStringExtra(CLIP_TYPE) ?: return@launch
+                val entityId = getIntExtra(ENTITY_ID, -1)
+                Timber.d("processIntent: id=$entityId, type=$clipType")
+                when (clipType) {
+                    FROM_CLIPBOARD ->
+                        ClipboardHelper.get(entityId)?.let {
+                            this@ClipEditActivity.clipType = clipType
+                            setEntity(it.id, it.text)
+                        }
+
+                    FROM_COLLECTION ->
+                        FavoriteHelper.get(entityId)?.let {
+                            this@ClipEditActivity.clipType = clipType
+                            setEntity(it.id, it.text)
+                        }
+                }
+            }
+        }
+    }
+
+    override fun onStop() {
+        super.onStop()
+        finish()
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        scope.cancel()
+    }
+
+    companion object {
+        const val ENTITY_ID = "id"
+        const val CLIP_TYPE = "clip_type"
+        const val FROM_CLIPBOARD = "from_clipboard"
+        const val FROM_COLLECTION = "from_collection"
+    }
+}
