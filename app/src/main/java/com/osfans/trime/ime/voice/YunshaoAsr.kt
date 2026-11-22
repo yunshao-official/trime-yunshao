@@ -1,11 +1,15 @@
 /*
  * 聆星·云韶离线语音识别（SenseVoice int8 + sherpa-onnx）
- * 模型查找顺序：外部私有目录 > 内部私有目录 > assets
- * 外部路径：/sdcard/Android/data/com.osfans.trime/files/asr/
+ * 模型查找顺序（依次尝试）：
+ *   1. /sdcard/Android/media/com.osfans.trime/asr/    ← 公共共享目录，用户可直接放
+ *   2. /sdcard/Download/trime-asr/                    ← 备用
+ *   3. <App内部>/files/asr/                            ← assets 解压目标
+ *   4. assets/asr/                                     ← 打包进 APK 时
  */
 package com.osfans.trime.ime.voice
 
 import android.content.Context
+import android.os.Environment
 import android.util.Log
 import com.k2fsa.sherpa.onnx.FeatureConfig
 import com.k2fsa.sherpa.onnx.OfflineModelConfig
@@ -22,6 +26,7 @@ object YunshaoAsr {
     private const val MODEL_FILE = "model.int8.onnx"
     private const val TOKENS_FILE = "tokens.txt"
     private const val MIN_MODEL_BYTES = 10_000_000L
+    private const val PKG = "com.osfans.trime"
 
     private var recognizer: OfflineRecognizer? = null
     private val loading = AtomicBoolean(false)
@@ -31,24 +36,45 @@ object YunshaoAsr {
     fun isReady(): Boolean = ready && recognizer != null
     fun getError(): String? = lastError
 
-    /** 外部私有目录（用户可直接放文件），Android/data/<pkg>/files/asr */
-    fun externalDir(ctx: Context): File =
-        File(ctx.getExternalFilesDir(null), DIR_NAME)
-
-    /** 内部私有目录（assets 解压目标） */
+    /** App 内部私有目录（assets 解压目标，永远可读） */
     fun internalDir(ctx: Context): File = File(ctx.filesDir, DIR_NAME)
 
-    /** 找出可用的模型目录 */
+    /** 候选外部目录（按优先级），都可被用户直接放文件或文件管理器拷进去 */
+    fun candidateDirs(ctx: Context): List<File> {
+        val list = mutableListOf<File>()
+        // 1. Android/media/<pkg>/asr —— 特殊媒体目录，其他 App 可读写
+        try {
+            val media = File(Environment.getExternalStorageDirectory(), "Android/media/$PKG/$DIR_NAME")
+            list.add(media)
+        } catch (_: Exception) {}
+        // 2. /sdcard/Download/trime-asr
+        try {
+            val dl = File(Environment.getExternalStorageDirectory(), "Download/trime-asr")
+            list.add(dl)
+        } catch (_: Exception) {}
+        // 3. App 私有外部目录
+        try {
+            ctx.getExternalFilesDir(null)?.let { list.add(File(it, DIR_NAME)) }
+        } catch (_: Exception) {}
+        // 4. App 私有内部目录
+        list.add(internalDir(ctx))
+        return list
+    }
+
+    /** 找到第一个含有效模型的目录 */
     fun resolveDir(ctx: Context): File? {
-        for (d in listOf(externalDir(ctx), internalDir(ctx))) {
+        for (d in candidateDirs(ctx)) {
             val m = File(d, MODEL_FILE)
             val t = File(d, TOKENS_FILE)
-            if (m.exists() && t.exists() && m.length() > MIN_MODEL_BYTES) return d
+            if (m.exists() && t.exists() && m.length() > MIN_MODEL_BYTES) {
+                Log.i(TAG, "model dir found: " + d.absolutePath)
+                return d
+            }
         }
         return null
     }
 
-    /** 首次运行：若外部/内部都没有，尝试从 assets 解压到内部目录 */
+    /** 首次运行：外部都没有时，尝试从 assets 解压到内部目录 */
     fun ensureModel(ctx: Context): Boolean {
         if (resolveDir(ctx) != null) return true
         val dir = internalDir(ctx)
@@ -58,9 +84,12 @@ object YunshaoAsr {
             copyAsset(ctx, "$DIR_NAME/$TOKENS_FILE", File(dir, TOKENS_FILE))
             true
         } catch (e: Exception) {
-            Log.e(TAG, "ensureModel failed (no assets, no external model)", e)
-            lastError = "未找到模型。请把 model.int8.onnx 和 tokens.txt 放到：" +
-                externalDir(ctx).absolutePath
+            Log.e(TAG, "ensureModel failed", e)
+            lastError = buildString {
+                append("未找到语音模型。请把两个文件放到以下任一目录：\n")
+                candidateDirs(ctx).take(2).forEach { append("  " + it.absolutePath + "\n") }
+                append("  需要：$MODEL_FILE (227MB) 和 $TOKENS_FILE")
+            }
             false
         }
     }
@@ -78,7 +107,7 @@ object YunshaoAsr {
             try {
                 if (!ensureModel(ctx)) { onDone(false); loading.set(false); return@Thread }
                 val dir = resolveDir(ctx) ?: run { onDone(false); loading.set(false); return@Thread }
-                Log.i(TAG, "loading model from " + dir.absolutePath)
+                Log.i(TAG, "loading from " + dir.absolutePath)
                 val config = OfflineRecognizerConfig(
                     featConfig = FeatureConfig(sampleRate = 16000, featureDim = 80),
                     modelConfig = OfflineModelConfig(
