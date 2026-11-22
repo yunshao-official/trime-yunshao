@@ -151,6 +151,20 @@ object YunshaoAsr {
         }
     }
 
+    /** Run recognition on a background thread and deliver the result on main. */
+    fun transcribeAsync(ctx: Context, samples: FloatArray, onResult: (String?) -> Unit) {
+        Thread {
+            val text = try {
+                transcribe(samples)
+            } catch (e: Exception) {
+                Log.e(TAG, "transcribeAsync failed", e)
+                lastError = "识别失败: " + e.message
+                null
+            }
+            android.os.Handler(android.os.Looper.getMainLooper()).post { onResult(text) }
+        }.start()
+    }
+
     fun release() {
         try { recognizer?.release() } catch (_: Exception) {}
         recognizer = null

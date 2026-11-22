@@ -320,18 +320,18 @@ class CommonKeyboardActionListener(override val di: DI) : DIAware {
                 }
             }
 
-            /** Yunshao offline voice input (local only) */
+            /** Yunshao offline voice input (fully local) */
             private fun showYunshaoVoicePanel() {
                 try {
-                    val panel = com.osfans.trime.ime.voice.VoicePanel(service) { text ->
+                    val panel = com.osfans.trime.ime.voice.VoicePanel(context) { text ->
                         service.lifecycleScope.launch {
                             service.commitText(text)
                         }
                     }
-                    panel.show()
+                    service.showDialog(panel.build())
                 } catch (e: Exception) {
                     android.util.Log.e("YunshaoAsr", "voice panel failed", e)
-                    service.toast("Voice panel error: " + e.message)
+                    service.toast("Voice panel error: " + (e.message ?: e.javaClass.simpleName))
                 }
             }
 
