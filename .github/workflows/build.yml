@@ -17,6 +17,22 @@ jobs:
         with:
           distribution: temurin
           java-version: '21'
+      - name: Download FireRedASR2 AED model into assets
+        run: |
+          set -e
+          mkdir -p app/src/main/assets/asr
+          cd /tmp
+          echo 'Downloading model (~800MB)...'
+          curl -L --retry 5 --retry-delay 5 --retry-all-errors -H 'User-Agent: Mozilla/5.0' \
+            -o model.tar.bz2 \
+            'https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-fire-red-asr2-zh_en-int8-2026-02-26.tar.bz2'
+          ls -lh model.tar.bz2
+          tar xf model.tar.bz2
+          ls -la sherpa-onnx-fire-red-asr2-zh_en-int8-2026-02-26/
+          cp sherpa-onnx-fire-red-asr2-zh_en-int8-2026-02-26/*.onnx app/src/main/assets/asr/ || true
+          cp sherpa-onnx-fire-red-asr2-zh_en-int8-2026-02-26/tokens.txt app/src/main/assets/asr/
+          echo '=== assets ==='
+          ls -lh app/src/main/assets/asr/
       - name: Cache Gradle
         uses: actions/cache@v4
         with:
@@ -27,14 +43,14 @@ jobs:
       - name: Build debug APK
         run: |
           chmod +x gradlew
-          ./gradlew :app:assembleDebug --no-daemon -Dspotless.check.skip=true -Dspotless.kotlin.skip=true 2>&1 | tail -40
+          ./gradlew :app:assembleDebug --no-daemon -Dspotless.check.skip=true 2>&1 | tail -30
           echo '=== APK files ==='
-          find app/build/outputs -name '*.apk' 2>/dev/null || true
+          ls -lh app/build/outputs/apk/debug/
       - name: Create Release
         if: success()
         uses: softprops/action-gh-release@v2
         with:
           tag_name: build-${{ github.run_number }}
-          name: Trime-Yunshao build ${{ github.run_number }}
+          name: Trime-Yunshao ASR build ${{ github.run_number }}
           files: app/build/outputs/apk/debug/*.apk
           token: ${{ secrets.GITHUB_TOKEN }}
