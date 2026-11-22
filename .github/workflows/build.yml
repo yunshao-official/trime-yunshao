@@ -1,11 +1,13 @@
 name: Build Trime-Yunshao APK
 on:
   push:
-    branches: [ develop, main, master ]
+    branches: [ main ]
   workflow_dispatch:
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -15,8 +17,10 @@ jobs:
         with:
           distribution: temurin
           java-version: '21'
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
+      - name: Accept Android licenses
+        run: |
+          yes | ${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager --licenses > /dev/null 2>&1 || true
+          echo 'SDK dir:'; ls ${ANDROID_HOME} 2>/dev/null | head -5
       - name: Cache Gradle
         uses: actions/cache@v4
         with:
@@ -27,10 +31,14 @@ jobs:
       - name: Build debug APK
         run: |
           chmod +x gradlew
-          ./gradlew :app:assembleDebug --stacktrace
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
+          ./gradlew :app:assembleDebug --no-daemon 2>&1 | tail -50
+          echo '=== APK ==='
+          ls -lh app/build/outputs/apk/debug/ || true
+      - name: Create Release
+        if: success()
+        uses: softprops/action-gh-release@v2
         with:
-          name: trime-yunshao-debug-apk
-          path: app/build/outputs/apk/debug/*.apk
-          retention-days: 30
+          tag_name: build-${{ github.run_number }}
+          name: Trime-Yunshao build ${{ github.run_number }}
+          files: app/build/outputs/apk/debug/*.apk
+          token: ${{ secrets.GITHUB_TOKEN }}
