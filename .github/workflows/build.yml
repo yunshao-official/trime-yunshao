@@ -1,4 +1,4 @@
-name: Build Trime-Yunshao APK
+name: Build Trime-Yunshao ASR
 on:
   push:
     branches: [ main ]
@@ -6,7 +6,7 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 90
     permissions:
       contents: write
     steps:
@@ -18,20 +18,27 @@ jobs:
         with:
           distribution: temurin
           java-version: '21'
-      - name: Download FireRedASR2 AED model (1.2GB)
+      - name: Download SenseVoice model (227MB)
         run: |
           set -e
           mkdir -p app/src/main/assets/asr
           cd /tmp
-          curl -L --retry 5 --retry-delay 5 --retry-all-errors -H 'User-Agent: Mozilla/5.0' \
-            -o m.tar.bz2 \
-            'https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-fire-red-asr2-zh_en-int8-2026-02-26.tar.bz2'
+          for i in 1 2 3 4 5; do
+            echo "attempt $i"
+            if curl -L --retry 3 --retry-delay 5 --retry-all-errors -H 'User-Agent: Mozilla/5.0' \
+              -o m.tar.bz2 \
+              'https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2025-09-09.tar.bz2'; then
+              SZ=$(stat -c%s m.tar.bz2 2>/dev/null || echo 0)
+              echo "size=$SZ"
+              if [ "$SZ" -gt 150000000 ]; then break; fi
+            fi
+            sleep 10
+          done
           ls -lh m.tar.bz2
           tar xf m.tar.bz2
-          cp sherpa-onnx-fire-red-asr2-zh_en-int8-2026-02-26/encoder.int8.onnx app/src/main/assets/asr/
-          cp sherpa-onnx-fire-red-asr2-zh_en-int8-2026-02-26/decoder.int8.onnx app/src/main/assets/asr/
-          cp sherpa-onnx-fire-red-asr2-zh_en-int8-2026-02-26/tokens.txt app/src/main/assets/asr/
-          echo '=== assets (should be ~1.2GB) ==='
+          cp sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2025-09-09/model.int8.onnx app/src/main/assets/asr/
+          cp sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2025-09-09/tokens.txt app/src/main/assets/asr/
+          echo '=== assets ==='
           du -sh app/src/main/assets/asr/
           ls -lh app/src/main/assets/asr/
       - name: Cache Gradle
@@ -41,11 +48,10 @@ jobs:
             ~/.gradle/caches
             ~/.gradle/wrapper
           key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
-      - name: Build debug APK with model
+      - name: Build debug APK
         run: |
           chmod +x gradlew
           ./gradlew :app:assembleDebug --no-daemon -Dspotless.check.skip=true 2>&1 | tail -25
-          echo '=== APK ==='
           ls -lh app/build/outputs/apk/debug/
       - name: Create Release
         if: success()
@@ -53,6 +59,6 @@ jobs:
         with:
           tag_name: asr-${{ github.run_number }}
           name: Trime-Yunshao ASR v${{ github.run_number }}
-          body: '离线语音识别版：FireRedASR2 AED int8 已内置，全本地零联网'
+          body: 'SenseVoice 227MB 内置 · 中英日韩粤 · RTF 0.033 · 全本地零联网'
           files: app/build/outputs/apk/debug/*.apk
           token: ${{ secrets.GITHUB_TOKEN }}

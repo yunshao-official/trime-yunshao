@@ -1,16 +1,18 @@
 /*
- * 聆星·云韶离线语音识别（FireRedASR2 CTC int8 + sherpa-onnx）
+ * 聆星·云韶离线语音识别（SenseVoice int8 + sherpa-onnx）
  * 2026-11-22 为知世定制：全本地、零联网、零隐私泄露
+ * 模型：sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8 (227MB, 中英日韩粤)
+ * 性能：RTF 0.033（比实时快30倍），内存 690MB
  */
 package com.osfans.trime.ime.voice
 
 import android.content.Context
 import android.util.Log
 import com.k2fsa.sherpa.onnx.FeatureConfig
-import com.k2fsa.sherpa.onnx.OfflineFireRedAsrModelConfig
 import com.k2fsa.sherpa.onnx.OfflineModelConfig
 import com.k2fsa.sherpa.onnx.OfflineRecognizer
 import com.k2fsa.sherpa.onnx.OfflineRecognizerConfig
+import com.k2fsa.sherpa.onnx.OfflineSenseVoiceModelConfig
 import java.io.File
 import java.io.FileOutputStream
 import java.util.concurrent.atomic.AtomicBoolean
@@ -18,8 +20,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 object YunshaoAsr {
     private const val TAG = "YunshaoAsr"
     private const val ASSET_DIR = "asr"
-    private const val ENCODER_FILE = "encoder.int8.onnx"
-    private const val DECODER_FILE = "decoder.int8.onnx"
+    private const val MODEL_FILE = "model.int8.onnx"
     private const val TOKENS_FILE = "tokens.txt"
 
     private var recognizer: OfflineRecognizer? = null
@@ -34,15 +35,13 @@ object YunshaoAsr {
 
     fun ensureModel(ctx: Context): Boolean {
         val dir = modelDir(ctx)
-        val enc = File(dir, ENCODER_FILE)
-        val dec = File(dir, DECODER_FILE)
-        val tok = File(dir, TOKENS_FILE)
-        if (enc.exists() && dec.exists() && tok.exists() && enc.length() > 1_000_000L) return true
+        val model = File(dir, MODEL_FILE)
+        val tokens = File(dir, TOKENS_FILE)
+        if (model.exists() && tokens.exists() && model.length() > 10_000_000L) return true
         if (!dir.exists()) dir.mkdirs()
         return try {
-            copyAsset(ctx, "$ASSET_DIR/$ENCODER_FILE", enc)
-            copyAsset(ctx, "$ASSET_DIR/$DECODER_FILE", dec)
-            copyAsset(ctx, "$ASSET_DIR/$TOKENS_FILE", tok)
+            copyAsset(ctx, "$ASSET_DIR/$MODEL_FILE", model)
+            copyAsset(ctx, "$ASSET_DIR/$TOKENS_FILE", tokens)
             true
         } catch (e: Exception) {
             Log.e(TAG, "ensureModel failed", e)
@@ -67,9 +66,9 @@ object YunshaoAsr {
                 val config = OfflineRecognizerConfig(
                     featConfig = FeatureConfig(sampleRate = 16000, featureDim = 80),
                     modelConfig = OfflineModelConfig(
-                        fireRedAsr = OfflineFireRedAsrModelConfig(
-                            encoder = File(dir, ENCODER_FILE).absolutePath,
-                            decoder = File(dir, DECODER_FILE).absolutePath
+                        senseVoice = OfflineSenseVoiceModelConfig(
+                            model = File(dir, MODEL_FILE).absolutePath,
+                            useInverseTextNormalization = true
                         ),
                         tokens = File(dir, TOKENS_FILE).absolutePath,
                         numThreads = 4,
