@@ -18,29 +18,23 @@ jobs:
         with:
           distribution: temurin
           java-version: '21'
-      - name: Download SenseVoice model (227MB)
+      - name: Download SenseVoice model from our release
         run: |
           set -e
           mkdir -p app/src/main/assets/asr
-          cd /tmp
-          for i in 1 2 3 4 5; do
-            echo "attempt $i"
-            if curl -L --retry 3 --retry-delay 5 --retry-all-errors -H 'User-Agent: Mozilla/5.0' \
-              -o m.tar.bz2 \
-              'https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2025-09-09.tar.bz2'; then
-              SZ=$(stat -c%s m.tar.bz2 2>/dev/null || echo 0)
-              echo "size=$SZ"
-              if [ "$SZ" -gt 150000000 ]; then break; fi
-            fi
-            sleep 10
+          cd app/src/main/assets/asr
+          BASE='https://github.com/yunshao-official/trime-yunshao/releases/download/model-sensevoice'
+          for f in model.int8.onnx tokens.txt; do
+            echo "downloading $f"
+            for i in 1 2 3 4 5; do
+              if curl -fL --retry 3 --retry-delay 5 -o "$f" "$BASE/$f"; then
+                echo "$f ok"; break
+              fi
+              echo "retry $i"; sleep 8
+            done
           done
-          ls -lh m.tar.bz2
-          tar xf m.tar.bz2
-          cp sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2025-09-09/model.int8.onnx app/src/main/assets/asr/
-          cp sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2025-09-09/tokens.txt app/src/main/assets/asr/
-          echo '=== assets ==='
-          du -sh app/src/main/assets/asr/
-          ls -lh app/src/main/assets/asr/
+          ls -lh
+          du -sh .
       - name: Cache Gradle
         uses: actions/cache@v4
         with:
