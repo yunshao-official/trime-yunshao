@@ -206,7 +206,7 @@ class VoicePanel(
     }
 
     private fun post(block: () -> Unit) {
-        main.post(block)
+        main.post { block() }
     }
 
     private fun makeButton(text: String, color: String): TextView =

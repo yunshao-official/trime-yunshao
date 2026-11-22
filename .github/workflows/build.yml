@@ -44,7 +44,13 @@ jobs:
       - name: Build debug APK (model bundled)
         run: |
           chmod +x gradlew
-          ./gradlew :app:assembleDebug --no-daemon -Dspotless.check.skip=true 2>&1 | tail -20
+          set +e
+          ./gradlew :app:assembleDebug --no-daemon -Dspotless.check.skip=true > /tmp/gradle.log 2>&1
+          RC=$?
+          echo "GRADLE_EXIT=$RC"
+          grep -E "^e: |error:" /tmp/gradle.log | head -40
+          tail -25 /tmp/gradle.log
+          if [ $RC -ne 0 ]; then exit $RC; fi
           ls -lh app/build/outputs/apk/debug/
       - name: Create Release
         if: success()
