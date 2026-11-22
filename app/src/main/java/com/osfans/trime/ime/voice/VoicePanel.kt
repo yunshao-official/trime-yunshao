@@ -146,8 +146,15 @@ class VoicePanel(
         }
         val rec = VoiceRecorder(ctx)
         if (!rec.hasPermission()) {
-            statusText.text = "缺少录音权限"
-            hintText.text = "请在系统设置中授予同文输入法录音权限"
+            statusText.text = "需要录音权限"
+            hintText.text = "已打开授权页，允许后回来点「开始」"
+            try {
+                val it = android.content.Intent(ctx, VoicePermissionActivity::class.java)
+                it.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                ctx.startActivity(it)
+            } catch (e: Exception) {
+                hintText.text = "请在系统设置中手动授予录音权限"
+            }
             return
         }
         recorder = rec

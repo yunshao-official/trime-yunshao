@@ -6,7 +6,7 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 90
     permissions:
       contents: write
     steps:
@@ -18,6 +18,22 @@ jobs:
         with:
           distribution: temurin
           java-version: '21'
+      - name: Download SenseVoice model via API
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          mkdir -p app/src/main/assets/asr
+          cd app/src/main/assets/asr
+          curl -s -H "Authorization: token $GH_TOKEN" \
+            'https://api.github.com/repos/yunshao-official/trime-yunshao/releases/tags/model-sensevoice' -o /tmp/rel.json
+          MID=$(python3 -c "import json;d=json.load(open('/tmp/rel.json'));print([a['id'] for a in d['assets'] if a['name']=='model.int8.onnx'][0])")
+          TID=$(python3 -c "import json;d=json.load(open('/tmp/rel.json'));print([a['id'] for a in d['assets'] if a['name']=='tokens.txt'][0])")
+          curl -fL -H "Authorization: token $GH_TOKEN" -H 'Accept: application/octet-stream' -o model.int8.onnx "https://api.github.com/repos/yunshao-official/trime-yunshao/releases/assets/$MID"
+          curl -fL -H "Authorization: token $GH_TOKEN" -H 'Accept: application/octet-stream' -o tokens.txt "https://api.github.com/repos/yunshao-official/trime-yunshao/releases/assets/$TID"
+          SZ=$(stat -c%s model.int8.onnx)
+          echo "model=$SZ"
+          if [ "$SZ" -lt 200000000 ]; then echo 'MODEL TOO SMALL'; exit 1; fi
       - name: Cache Gradle
         uses: actions/cache@v4
         with:
@@ -25,17 +41,17 @@ jobs:
             ~/.gradle/caches
             ~/.gradle/wrapper
           key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
-      - name: Build debug APK (no model bundled)
+      - name: Build debug APK (model bundled)
         run: |
           chmod +x gradlew
-          ./gradlew :app:assembleDebug --no-daemon -Dspotless.check.skip=true 2>&1 | tail -15
+          ./gradlew :app:assembleDebug --no-daemon -Dspotless.check.skip=true 2>&1 | tail -20
           ls -lh app/build/outputs/apk/debug/
       - name: Create Release
         if: success()
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: asr-lite-${{ github.run_number }}
-          name: Trime-Yunshao ASR lite v${{ github.run_number }}
-          body: '离线语音识别版（模型放外部目录）。模型下载见 model-sensevoice release'
+          tag_name: full-${{ github.run_number }}
+          name: Trime-Yunshao ASR full v${{ github.run_number }}
+          body: '内置 SenseVoice 227MB · 🎤 键 · 全本地'
           files: app/build/outputs/apk/debug/*arm64-v8a*.apk
           token: ${{ secrets.GITHUB_TOKEN }}
