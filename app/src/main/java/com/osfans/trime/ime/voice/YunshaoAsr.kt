@@ -30,6 +30,8 @@ object YunshaoAsr {
 
     private var recognizer: OfflineRecognizer? = null
     private val loading = AtomicBoolean(false)
+    /** sherpa-onnx 的 native 识别器不是线程安全的，必须串行调用 */
+    private val inferLock = Any()
     @Volatile private var ready = false
     @Volatile private var lastError: String? = null
 
@@ -138,12 +140,14 @@ object YunshaoAsr {
     fun transcribe(samples: FloatArray, sampleRate: Int = 16000): String? {
         val rec = recognizer ?: return null
         return try {
-            val stream = rec.createStream()
-            stream.acceptWaveform(samples, sampleRate)
-            rec.decode(stream)
-            val result = rec.getResult(stream)
-            val text = result.text.trim()
-            text.ifEmpty { null }
+            synchronized(inferLock) {
+                val stream = rec.createStream()
+                stream.acceptWaveform(samples, sampleRate)
+                rec.decode(stream)
+                val result = rec.getResult(stream)
+                val text = result.text.trim()
+                text.ifEmpty { null }
+            }
         } catch (e: Exception) {
             Log.e(TAG, "transcribe failed", e)
             lastError = "识别失败: " + e.message

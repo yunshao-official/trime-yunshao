@@ -126,6 +126,20 @@ SPDX-License-Identifier: GPL-3.0-or-later
             android:noHistory="true"
             android:theme="@android:style/Theme.Translucent.NoTitleBar" />
 
+        <!-- 系统级语音识别服务：可在各输入法/应用的语音设置中选为识别引擎 -->
+        <service
+            android:name=".ime.voice.YunshaoRecognitionService"
+            android:exported="true"
+            android:label="@string/yunshao_recognition_name"
+            android:permission="android.permission.BIND_RECOGNITION_SERVICE">
+            <intent-filter>
+                <action android:name="android.speech.RecognitionService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.speech" 
+                android:resource="@xml/recognition_service" />
+        </service>
+
         <!-- Using an activity alias to disable/enable the app icon in the launcher -->
         <activity-alias
             android:name="com.osfans.trime.MainLauncherAlias"
