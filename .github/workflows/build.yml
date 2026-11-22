@@ -25,24 +25,15 @@ jobs:
           set -e
           mkdir -p app/src/main/assets/asr
           cd app/src/main/assets/asr
-          echo '=== resolve asset ids ==='
           curl -s -H "Authorization: token $GH_TOKEN" \
-            'https://api.github.com/repos/yunshao-official/trime-yunshao/releases/tags/model-sensevoice' \
-            -o /tmp/rel.json
-          cat /tmp/rel.json | head -c 300
+            'https://api.github.com/repos/yunshao-official/trime-yunshao/releases/tags/model-sensevoice' -o /tmp/rel.json
           MID=$(python3 -c "import json;d=json.load(open('/tmp/rel.json'));print([a['id'] for a in d['assets'] if a['name']=='model.int8.onnx'][0])")
           TID=$(python3 -c "import json;d=json.load(open('/tmp/rel.json'));print([a['id'] for a in d['assets'] if a['name']=='tokens.txt'][0])")
-          echo "MODEL_ASSET=$MID TOKENS_ASSET=$TID"
-          curl -fL -H "Authorization: token $GH_TOKEN" -H 'Accept: application/octet-stream' \
-            -o model.int8.onnx "https://api.github.com/repos/yunshao-official/trime-yunshao/releases/assets/$MID"
-          curl -fL -H "Authorization: token $GH_TOKEN" -H 'Accept: application/octet-stream' \
-            -o tokens.txt "https://api.github.com/repos/yunshao-official/trime-yunshao/releases/assets/$TID"
-          ls -lh
-          echo '=== verify size ==='
+          curl -fL -H "Authorization: token $GH_TOKEN" -H 'Accept: application/octet-stream' -o model.int8.onnx "https://api.github.com/repos/yunshao-official/trime-yunshao/releases/assets/$MID"
+          curl -fL -H "Authorization: token $GH_TOKEN" -H 'Accept: application/octet-stream' -o tokens.txt "https://api.github.com/repos/yunshao-official/trime-yunshao/releases/assets/$TID"
           SZ=$(stat -c%s model.int8.onnx)
-          echo "model size = $SZ"
-          if [ "$SZ" -lt 200000000 ]; then echo 'MODEL TOO SMALL, FAIL'; exit 1; fi
-          echo 'MODEL OK'
+          echo "model=$SZ"
+          if [ "$SZ" -lt 200000000 ]; then echo FAIL; exit 1; fi
       - name: Cache Gradle
         uses: actions/cache@v4
         with:
@@ -53,15 +44,38 @@ jobs:
       - name: Build debug APK
         run: |
           chmod +x gradlew
-          ./gradlew :app:assembleDebug --no-daemon -Dspotless.check.skip=true 2>&1 | tail -20
-          echo '=== APK size check ==='
+          ./gradlew :app:assembleDebug --no-daemon -Dspotless.check.skip=true 2>&1 | tail -15
           ls -lh app/build/outputs/apk/debug/
+      - name: Split APK and commit to dist branch
+        if: success()
+        run: |
+          set -e
+          APK=$(ls app/build/outputs/apk/debug/*arm64-v8a*.apk)
+          echo "APK=$APK $(stat -c%s $APK) bytes"
+          mkdir -p /tmp/dist
+          cd /tmp/dist
+          split -b 45M -d "$OLDPWD/$APK" apk.part.
+          ls -lh
+          echo '=== create manifest ==='
+          python3 -c "
+          import os, hashlib, json
+          parts = sorted([f for f in os.listdir('.') if f.startswith('apk.part.')])
+          m = {'total': len(parts), 'size': sum(os.path.getsize(p) for p in parts), 'parts': [{'name':p,'size':os.path.getsize(p)} for p in parts]}
+          json.dump(m, open('manifest.json','w'), indent=2)
+          print(json.dumps(m))
+          "
+          git init -q .
+          git config user.email 'ci@local'
+          git config user.name 'CI'
+          git add -A
+          git commit -q -m 'dist: apk chunks'
+          git push -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/yunshao-official/trime-yunshao.git" HEAD:dist
       - name: Create Release
         if: success()
         uses: softprops/action-gh-release@v2
         with:
           tag_name: asr-${{ github.run_number }}
           name: Trime-Yunshao ASR v${{ github.run_number }}
-          body: 'SenseVoice 227MB 内置 · RTF 0.033 · 全本地'
-          files: app/build/outputs/apk/debug/*.apk
+          body: 'APK 已拆分到 dist 分支（45MB/块），用 jsDelivr 下载'
+          files: app/build/outputs/apk/debug/*arm64-v8a*.apk
           token: ${{ secrets.GITHUB_TOKEN }}
