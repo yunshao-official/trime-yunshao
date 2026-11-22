@@ -1,0 +1,26 @@
+{
+  "total": 5,
+  "size": 192391434,
+  "parts": [
+    {
+      "name": "apk.part.00",
+      "size": 47185920
+    },
+    {
+      "name": "apk.part.01",
+      "size": 47185920
+    },
+    {
+      "name": "apk.part.02",
+      "size": 47185920
+    },
+    {
+      "name": "apk.part.03",
+      "size": 47185920
+    },
+    {
+      "name": "apk.part.04",
+      "size": 3647754
+    }
+  ]
+}
