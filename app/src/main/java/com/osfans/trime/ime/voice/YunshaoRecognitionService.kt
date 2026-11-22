@@ -1,13 +1,11 @@
 /*
- * 系统级语音识别服务（Android RecognitionService）
+ * 系统级语音识别服务（Android RecognitionService，Callback 形态）
  *
- * 作用：让任何使用系统语音输入的 App（包括讯飞输入法、谷歌键盘、
- *       系统搜索框等）都可以改用 SenseVoice 离线模型。
+ * 作用：让任何使用系统语音输入的 App 都能改用 SenseVoice 离线模型。
+ *   - 系统「语音输入」设置页会列出本服务
+ *   - 输入法（如讯飞）如果走系统语音接口，也能选到本服务
  *
- * 工作方式：
- *   1. 系统把麦克风音频以 byte[] 缓冲区形式喂进来
- *   2. 累积到一定量就跑一次识别，回报 partialResults（实时字幕效果）
- *   3. onEndOfSpeech 时跑最后一次，回报最终 results
+ * 音频契约：RecognitionService 以 byte[] 交付 PCM16 / 16kHz / 单声道。
  */
 package com.osfans.trime.ime.voice
 
@@ -17,7 +15,6 @@ import android.content.pm.PackageManager
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
-import android.speech.RecognitionListener
 import android.speech.RecognitionService
 import android.speech.SpeechRecognizer
 import android.util.Log
@@ -29,33 +26,31 @@ class YunshaoRecognitionService : RecognitionService() {
     companion object {
         private const val TAG = "YunshaoRecognizer"
         private const val SAMPLE_RATE = 16000
-        /** 每累积这么多秒音频就做一次中间识别，回报实时结果 */
+        /** 每累积这么多秒音频做一次中间识别，回报实时字幕 */
         private const val PARTIAL_INTERVAL_SEC = 1.2f
     }
 
     private val main = Handler(Looper.getMainLooper())
     private val working = AtomicBoolean(false)
 
-    private var listener: RecognitionListener? = null
+    private var callback: RecognitionService.Callback? = null
     private val audio = ByteArrayOutputStream()
     @Volatile private var lastPartialBytes = 0
-    @Volatile private var stopped = false
     @Volatile private var cancelled = false
     @Volatile private var resultDelivered = false
 
     override fun onCreate() {
         super.onCreate()
-        // 预热模型，避免第一次使用时的加载延迟
+        // 预热模型，避免首次使用时的加载延迟
         YunshaoAsr.loadAsync(this) { ok ->
             Log.i(TAG, "preload recognizer: ok=$ok")
         }
     }
 
-    override fun onStartListening(intent: Intent?, listener: RecognitionListener?) {
-        this.listener = listener
+    override fun onStartListening(recognizerIntent: Intent?, listener: RecognitionService.Callback?) {
+        this.callback = listener
         audio.reset()
         lastPartialBytes = 0
-        stopped = false
         cancelled = false
         resultDelivered = false
 
@@ -71,14 +66,8 @@ class YunshaoRecognitionService : RecognitionService() {
         }
 
         working.set(true)
-        val ready = Bundle()
-        // 声明需要的音频格式：PCM16 / 16kHz / 单声道
-        ready.putInt(
-            android.speech.SpeechRecognizer.EXTRA_AUDIO_SOURCE,
-            0,
-        )
-        listener?.onReadyForSpeech(ready)
-        listener?.onBeginningOfSpeech()
+        listener?.readyForSpeech(Bundle())
+        listener?.beginningOfSpeech()
     }
 
     override fun onBufferReceived(buffer: ByteArray?) {
@@ -86,49 +75,36 @@ class YunshaoRecognitionService : RecognitionService() {
         if (!working.get()) return
         audio.write(buffer, 0, buffer.size)
 
-        // 每积累够一段就跑一次中间识别
         val newBytes = audio.size() - lastPartialBytes
         if (newBytes >= (SAMPLE_RATE * 2 * PARTIAL_INTERVAL_SEC).toInt()) {
             lastPartialBytes = audio.size()
-            val snapshot = audio.toByteArray()
-            runPartial(snapshot)
+            runPartial(audio.toByteArray())
         }
     }
 
     override fun onEndOfSpeech() {
         if (!working.get()) return
-        stopped = true
-        val snapshot = audio.toByteArray()
-        runFinal(snapshot)
+        if (resultDelivered) return
+        runFinal(audio.toByteArray())
     }
 
-    override fun onStopListening() {
-        stopped = true
+    override fun onStopListening(listener: RecognitionService.Callback?) {
+        // 客户端停止收听；如果还没给最终结果，补一次
+        if (working.get() && !resultDelivered) {
+            runFinal(audio.toByteArray())
+        }
     }
 
-    override fun onCancel() {
+    override fun onCancel(listener: RecognitionService.Callback?) {
         cancelled = true
         working.set(false)
-        listener?.onError(SpeechRecognizer.ERROR_CLIENT)
-        listener = null
+        callback = null
     }
 
     override fun onDestroy() {
         working.set(false)
-        listener = null
+        callback = null
         super.onDestroy()
-    }
-
-    override fun onCheckRecognitionSupport(intent: Intent?) {
-        // 报告支持当前设备的默认语言
-        val result = Bundle()
-        val languages = ArrayList<String>()
-        languages.add(java.util.Locale.getDefault().toLanguageTag())
-        result.putStringArrayList(
-            RecognitionService.SUPPORTED_LANGUAGES,
-            languages,
-        )
-        main.post { listener?.onEvent(RecognitionService.EVENT_SUPPORT_CHECK_COMPLETE, result) }
     }
 
     // ---------------- 识别 ----------------
@@ -141,7 +117,7 @@ class YunshaoRecognitionService : RecognitionService() {
                 if (cancelled || resultDelivered) return@post
                 val b = Bundle()
                 b.putStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION, arrayListOf(text))
-                listener?.onPartialResults(b)
+                callback?.partialResults(b)
             }
         }.start()
     }
@@ -154,13 +130,13 @@ class YunshaoRecognitionService : RecognitionService() {
                 resultDelivered = true
                 working.set(false)
                 if (text.isNullOrBlank()) {
-                    listener?.onError(SpeechRecognizer.ERROR_NO_MATCH)
+                    callback?.error(SpeechRecognizer.ERROR_NO_MATCH)
                 } else {
                     val b = Bundle()
                     b.putStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION, arrayListOf(text))
-                    listener?.onResults(b)
+                    callback?.results(b)
                 }
-                listener = null
+                callback = null
             }
         }.start()
     }
@@ -179,8 +155,8 @@ class YunshaoRecognitionService : RecognitionService() {
 
     private fun deliverError(code: Int) {
         main.post {
-            listener?.onError(code)
-            listener = null
+            callback?.error(code)
+            callback = null
         }
     }
 }
