@@ -182,7 +182,8 @@ class YunshaoRecognitionService : RecognitionService() {
         try { rec?.release() } catch (_: Exception) {}
     }
 
-    override fun onEndOfSpeech() {
+    /** 服务内部判定“用户说完了”，不是框架抽象方法 */
+    private fun handleSpeechEnded() {
         if (!working.get()) return
         if (resultDelivered) return
         runFinal(audio.toByteArray())
